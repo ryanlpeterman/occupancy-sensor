@@ -1,19 +1,28 @@
 ## Initial Problem
 
-I lost my keys the other day and can't get into my apartment
+I lost my keys the other day and couldn't get into my apartment
 
 ## Current Problem
 
-UCLA IEEE, the electrical engineering club on campus, has a lab in which there are parts available and many projects being worked on all the time by its members. However, the lab is only open when officers are in the lab for assistance, which is just about 24/7. The only problem is that because as engineers we are night dwellers, the lab is not consistently open in the morning and therefore its hard to tell if its okay to come in. Therefore this script is being moded to use to tell if officers are in the lab.
+UCLA IEEE, the electrical engineering club on campus, has a lab in which there are parts available and many projects being worked on all the time by its members. However, the lab is only open when officers are in the lab for assistance, which is just about 24/7. The only problem is that because as engineers we are night dwellers, the lab is not consistently open in the morning and therefore its hard to tell if its okay to come in. Therefore this script is being moded to tell if officers are in the lab.
 
 ## Solution
 
-Use MAC addresses given to me from router to tell me who is home to let me in so I only need to ask exactly who is available to let me in to open the door.
+How the look-up works:
+
+	1. Use arp-scan to ask router for mac addresses of devices connected to the router
+	2. Find what the corresponding person associated with that mac address is
+
+How Slack Bot works:
+
+	whois - prints out a list of the people currently in the lab by look-up method
+
+	time - outputs the number of seconds the person has been in the lab since the 
+	script has been running (this is updated everytime the rpi scans)
+
+	help - prints out all options
 
 ## Future Features
 
-1. Statistics on who is in the lab 
-2. Building suggested times to catch a person in the lab using the statistics each quarter
-
-### TODO:
-1. Converting the script to python for portability (and because I like learning Python)
+1. Introduce natural language processing into the model such that the users don't need to 
+type in exact queries similar to how Siri works.
