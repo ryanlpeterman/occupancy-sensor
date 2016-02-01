@@ -81,7 +81,7 @@ def run_scan():
 				officer.miss_count = 0
 				scan_hit = True
 
-				print "Found : " + officer.name
+				# print "Found : " + officer.name
 
 				# use this for timing statistics
 				officer.minutes += 1
@@ -221,8 +221,9 @@ def main():
 		while True:
 			# read events from peterbot's feed
 			events = sc.rtm_read()
-			print events
-			print counter
+
+			# print events
+			# print counter
 
 			for e in events:
 				message = ""
