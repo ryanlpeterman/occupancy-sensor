@@ -9,7 +9,10 @@ chown $USER supervisor_log.txt
 
 while true
 do
-	# Note: python script will catch Ctrl-C enless we
+	# printf for readability
+	(printf "\n\n" ; date; printf "\n") >> supervisor_log.txt
+	
+	# Note: python script will catch Ctrl-C enless we 
 	# write a sig handler
-	(./get_occupants.py ; date) >> supervisor_log.txt
+	(python get_occupants.py) >> supervisor_log.txt 2>&1
 done
