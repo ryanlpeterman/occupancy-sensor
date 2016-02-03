@@ -113,8 +113,8 @@ def exit_handler():
 		cell = wks.find(officer.name)
 
 		# write out the officers information TODO: don't hardcode this
-		wks.update_cell(cell.row, 4, officer.status)
-		wks.update_cell(cell.row, 5, officer.minutes)
+		wks.update_cell(cell.row, 3, officer.status)
+		wks.update_cell(cell.row, 4, officer.minutes)
 
 	print "Wrote out to google sheets!"
 		
@@ -123,13 +123,24 @@ def get_officers():
 	# build up newline delimited string of officers
 	officer_str = ""
 
+	# bool for when only anonymous people in lab
+	is_someone_in = False
+
 	# if officer is in lab add to str
 	for officer in officer_list:
-		if officer.is_in_lab and not officer.status:
-			officer_str += officer.name + "\n"
-
+		if officer.is_in_lab: 
+			if not officer.status:
+				officer_str += officer.name + "\n"
+			else:
+				is_someone_in = True
+	
+	# no officers to explicitly add
 	if not officer_str:
-		return "To my knowledge it appears no one is in the lab. Please try again to be sure!"
+		# an anoymous person is in the lab
+		if is_someone_in:
+			return "Someone is in the lab (their status is anonymous at the moment)!"
+		else:
+			return "To my knowledge it appears no one is in the lab. Please try again to be sure!"
 	
 	return officer_str
 
@@ -139,7 +150,7 @@ def get_top_officers():
 
 	top_str = ""
 
-	for index in xrange(1, 4):
+	for index in xrange(1, 11):
 		cur_officer =  top_list[index - 1]
 		hours = cur_officer.minutes / 60
 		minutes = cur_officer.minutes % 60
@@ -220,8 +231,15 @@ def main():
 	if sc.rtm_connect():
 		while True:
 			# read events from peterbot's feed
-			events = sc.rtm_read()
-
+			try:
+				events = sc.rtm_read()
+			# in the event that it throws an error just set it
+			# to an empty list and continue
+			except Exception, e:
+				# print to add to log
+				print e
+				events = []
+				
 			# print events
 			# print counter
 
@@ -254,13 +272,15 @@ def main():
 
 							if not officer.status:
 								message = "You are currently tracked/online."
-								officer.is_in_lab = True
+							
 							else:
 								message = "You are currently not tracked/offline. You are not visible to others but are still gaining time in the lab statistics. \n"
-								officer.is_in_lab = False
 				
 				elif user_input == "top":
 					message = get_top_officers()
+
+				elif user_input == "version":
+					message = "petermanbot v B0.1.2 - I'm Beta as Fuck right now."				
 
 				elif user_input == "time":
 					try:
@@ -287,7 +307,8 @@ def main():
 					whois - prints people currently in the lab \n \
 					time - prints how long you were in the lab this past week \n \
 					status - toggle your status to online/offline \n \
-					top - prints the top three time totals \n"
+					top - prints the top ten time totals \n \
+					version - prints current version \n"
 
 				# if there is a message to send, then send it
 				# will not respond if received from bot message to prevent
