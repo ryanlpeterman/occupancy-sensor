@@ -255,6 +255,25 @@ def main():
 				if user_input == "whois":
 					# reply with list of officers
 					message = get_officers()
+				
+				if user_input == "kill":
+					try:
+						user_dict = json.loads(sc.api_call("users.info", user=e.get("user")))
+					except Exception: 
+						message = "Failed to load users when looking up your name"	
+					
+					# if the user's id is Ryan's, exit script so supervisor will reload it to add new users
+					if user_dict["user"]["id"] == "U0F8HE81Y":
+						# print for debugging log
+						print "Ryan killed the script, don't worry"
+						
+						# send message to Ryan to let him know we are restarting the script
+						message = "Killed it, writing to google sheets. One moment please"
+						chan_id = e.get("channel")
+						sc.api_call("chat.postMessage", as_user="true:", channel=chan_id, text=message)
+						return
+					else: 
+						message = "nice try, you don't have the power to kill"
 
 				elif user_input == "status":
 					try:
@@ -266,7 +285,6 @@ def main():
 					name = user_dict["user"]["profile"]["real_name"]
 
 					for officer in officer_list:
-
 						if officer.name == name:
 							officer.status = 1 - officer.status
 
