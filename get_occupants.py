@@ -80,15 +80,11 @@ def run_scan():
 				officer.is_in_lab = True
 				officer.miss_count = 0
 				scan_hit = True
-
-				# print "Found : " + officer.name
-
-				# use this for timing statistics
-				officer.minutes += 1
 	
 		# if this officer not found in arp-scan				
 		if not scan_hit:
 			officer.miss_count += 1
+
 		# officer was found and set scan_hit back to false for next officer
 		else:
 			scan_hit = False
@@ -96,8 +92,11 @@ def run_scan():
 		# they have been missing for more than 5 minutes
 		if officer.miss_count > 5:
 			officer.is_in_lab = False
-	
 
+		# if they are in the lab then add a minute
+		if officer.is_in_lab:
+			officer.minutes += 1
+	
 def exit_handler():
 	# init google sheets api
 	json_key = json.load(open('occupancy sensor-52452f4f1313.json'))
@@ -298,7 +297,7 @@ def main():
 					message = get_top_officers()
 
 				elif user_input == "version":
-					message = "petermanbot v B0.1.2 - I'm Beta as Fuck right now."				
+					message = "petermanbot v B0.1.3 - I'm Beta as Fuck right now."				
 
 				elif user_input == "time":
 					try:
