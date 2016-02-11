@@ -19,6 +19,56 @@ from slackclient import SlackClient
 import gspread
 from oauth2client.client import SignedJwtAssertionCredentials
 
+
+
+# to track stdout for bugfix
+import sys
+import traceback
+import re
+
+# save reference to old stderr
+oldstderr = sys.stderr
+
+# error strings to look out for
+e_str1 = "socket is already closed"
+e_str2 = "[Errno 110] Connection timed out"
+e_str3 = "Connection is already closed."
+
+
+def check_output(s):
+	"""checks stderr for network error to properly exit"""
+	if any(re.match(regex, s) for regex in [e_str1, e_str2, e_str3]):
+
+		oldstderr.write("Caught Network Error\n")
+
+		# print stack trace
+		for line in traceback.format_stack():
+			oldstderr.write(line.strip() + '\n')
+
+		# exit in a well defined way
+		exit_handler()
+
+	else:
+		oldstderr.write(s)
+
+class NewStderr:
+
+	def __getattr__(self, name):
+		"""called when attribute not defined for NewStdout is accessed"""
+		# if newstdout write is called
+		if name == 'write':
+			return lambda s : check_output(s)
+
+		return getattr(oldstderr, name)
+
+	def __setattr__(self, name, value):
+		return setattr(oldstderr, name, value)
+
+# assign new stderr
+sys.stderr = NewStderr()
+
+
+# TODO: load this from a file only on rpi
 # Token from slack for bot API
 bot_token = ""
 
@@ -26,6 +76,7 @@ bot_token = ""
 officer_list = []
 
 class Officer:
+
 	name = ""
 	mac_addr = ""
 	status = 0 # 0 == online, 1 == tracked 
@@ -33,7 +84,7 @@ class Officer:
 	is_in_lab = False
 	miss_count = 0 # if this gets to 5 we remove them from the list
 				   # if they are seen on the scan we set it to 0
-	# default constructor
+
 	def __init__(self):
 		self.name = ""
 		self.mac_addr = ""
@@ -42,17 +93,14 @@ class Officer:
 		self.is_in_lab = False
 		self.miss_count = 0
 
-	# print officer function
 	def print_officer(self):
+		""" print officer function for debugging"""
 		print "-------------------------"
 		for m_data in [a for a in dir(self) if not a.startswith('__') and not callable(getattr(self,a))]:
 			print m_data + " = " + str(getattr(self, m_data))
 
 def run_scan():
-	""" Returns a string of all the recognized people according to the list
-	of MAC addresses in mac_addresses.txt in the cwd
-	This function also populates officer_list times every time
-	NOTE: YOU MUST RUN THIS AS ROOT AND HAVE ETHERNET CONENCTION"""
+	""" populates officer list with mac addresses seen in arp-scan """
 
 	# store arp output (max 20 retries)
 	for attempt in xrange(20):
@@ -67,7 +115,7 @@ def run_scan():
 
 	# didnt work even after 20 tries
 	if not arp_output:
-		print "Error: arp-scan did not work correctly even after 20 tries"
+		sys.stderr.write("Error: arp-scan did not work correctly even after 20 tries")
 
 	# used to add to miss count
 	scan_hit = False
@@ -96,8 +144,12 @@ def run_scan():
 		# if they are in the lab then add a minute
 		if officer.is_in_lab:
 			officer.minutes += 1
-	
+
 def exit_handler():
+	""" Writes out the lab info to google sheets then exits """
+
+	print "Entering exit handler"
+
 	# init google sheets api
 	json_key = json.load(open('occupancy sensor-52452f4f1313.json'))
 	scope = ['https://spreadsheets.google.com/feeds']
@@ -116,9 +168,12 @@ def exit_handler():
 		wks.update_cell(cell.row, 4, officer.minutes)
 
 	print "Wrote out to google sheets!"
-		
-def get_officers():
 
+	# exit without calling anything else
+	os._exit(0)
+
+def get_officers():
+	""" Checks current list of officers to see who is in the lab """
 	# build up newline delimited string of officers
 	officer_str = ""
 
@@ -144,6 +199,7 @@ def get_officers():
 	return officer_str
 
 def get_top_officers():
+	""" Returns a string of the top 10 total times among the officers """
 
 	top_list = sorted(officer_list, key=lambda x: x.minutes , reverse=True)
 
@@ -163,10 +219,9 @@ def get_top_officers():
 
 	return top_str
 
-
 def init_officers():
-	""" Populates all the officer objects with their data
-	from the google sheets API"""
+	""" Populates all the officer objects with their data from the google sheets API"""
+
 	json_key = json.load(open('occupancy sensor-52452f4f1313.json'))
 	scope = ['https://spreadsheets.google.com/feeds']
 	credentials = SignedJwtAssertionCredentials(json_key['client_email'], json_key['private_key'].encode(), scope)
@@ -197,9 +252,92 @@ def init_officers():
 			elif col_label == "Minutes":
 				officer.minutes = int(value)
 
-	# # To print officers
-	# for i in officer_list:
-	# 	i.print_officer()
+def handle_input(user_input, event, sc):
+	""" returns the message that a user would receive based on their input """
+
+	message = ""
+
+	# if bot received text "whois"
+	if user_input == "whois":
+		# reply with list of officers
+		message = get_officers()
+	
+	elif user_input == "kill":
+		try:
+			user_dict = json.loads(sc.api_call("users.info", user=event.get("user")))
+		except Exception: 
+			message = "Failed to load users when looking up your name."	
+		
+		# if the user's id is Ryan's, exit script so supervisor will reload it to add new users
+		if user_dict["user"]["id"] == "U0F8HE81Y":
+			# print for debugging log
+			print "Received kill command from slack"
+			
+			# send message to Ryan to let him know we are restarting the script
+			message = "Killed it, writing to google sheets. One moment please"
+			chan_id = event.get("channel")
+			sc.api_call("chat.postMessage", as_user="true:", channel=chan_id, text=message)
+			
+			# exit script
+			exit_handler()
+		else: 
+			message = "Nice try, you don't have the power to kill."
+
+	elif user_input == "status":
+		try:
+			user_dict = json.loads(sc.api_call("users.info", user=event.get("user")))
+		except Exception: 
+			message = "Failed to load users when looking up your name."
+		
+		# grabs real name of user
+		name = user_dict["user"]["profile"]["real_name"]
+
+		for officer in officer_list:
+			if officer.name == name:
+				officer.status = 1 - officer.status
+
+				if not officer.status:
+					message = "You are currently tracked/online."
+				
+				else:
+					message = "You are currently not tracked/offline. You are not visible to others but are still gaining time in the lab statistics. \n"
+	
+	elif user_input == "top":
+		message = get_top_officers()
+
+	elif user_input == "version":
+		message = "petermanbot v B0.1.3 - I'm Beta as Fuck right now."				
+
+	elif user_input == "time":
+		try:
+			user_dict = json.loads(sc.api_call("users.info", user=event.get("user")))
+		except Exception: 
+			message = "Failed to load users when looking up your name"
+		
+		# grabs real name of user
+		name = user_dict["user"]["profile"]["real_name"]
+
+		for officer in officer_list:
+
+			if officer.name == name:
+				minutes = officer.minutes % 60
+				hours = officer.minutes / 60
+
+				message = "You currently have a total of " + str(hours) + " hours, " + str(minutes) + " minutes in the lab." 
+
+		if not message:
+			message = "You are not in the google sheet."
+
+	else:
+		# TODO: fix this convention with paren around string
+		message = "Here are the following commands I support:\n \
+		whois - prints people currently in the lab \n \
+		time - prints how long you were in the lab this past week \n \
+		status - toggle your status to online/offline \n \
+		top - prints the top ten time totals \n \
+		version - prints current version \n"
+
+	return message
 
 def main():
 	# init bot token and officers from google sheets
@@ -226,7 +364,7 @@ def main():
 	# so we can poll when counter reachs 60 or 1 min
 	counter = 0
 
-	# conenct to the bots feed
+	# connect to the bots feed
 	if sc.rtm_connect():
 		while True:
 			# read events from peterbot's feed
@@ -236,101 +374,24 @@ def main():
 			# to an empty list and continue
 			except Exception, e:
 				# print to add to log
-				print e
+				sys.stderr.write(e)
 				events = []
-				
-			# print events
-			# print counter
 
 			for e in events:
-				message = ""
 				user_input = ""
+				message = ""
 
 				# format the input text
 				if e.get("text"):
 					user_input = e.get("text").lower().strip()
-
-				# if bot received text "whois"
-				if user_input == "whois":
-					# reply with list of officers
-					message = get_officers()
-				
-				if user_input == "kill":
-					try:
-						user_dict = json.loads(sc.api_call("users.info", user=e.get("user")))
-					except Exception: 
-						message = "Failed to load users when looking up your name"	
 					
-					# if the user's id is Ryan's, exit script so supervisor will reload it to add new users
-					if user_dict["user"]["id"] == "U0F8HE81Y":
-						# print for debugging log
-						print "Ryan killed the script, don't worry"
-						
-						# send message to Ryan to let him know we are restarting the script
-						message = "Killed it, writing to google sheets. One moment please"
-						chan_id = e.get("channel")
-						sc.api_call("chat.postMessage", as_user="true:", channel=chan_id, text=message)
-						return
-					else: 
-						message = "nice try, you don't have the power to kill"
-
-				elif user_input == "status":
-					try:
-						user_dict = json.loads(sc.api_call("users.info", user=e.get("user")))
-					except Exception: 
-						message = "Failed to load users when looking up your name"
-					
-					# grabs real name of user
-					name = user_dict["user"]["profile"]["real_name"]
-
-					for officer in officer_list:
-						if officer.name == name:
-							officer.status = 1 - officer.status
-
-							if not officer.status:
-								message = "You are currently tracked/online."
-							
-							else:
-								message = "You are currently not tracked/offline. You are not visible to others but are still gaining time in the lab statistics. \n"
-				
-				elif user_input == "top":
-					message = get_top_officers()
-
-				elif user_input == "version":
-					message = "petermanbot v B0.1.3 - I'm Beta as Fuck right now."				
-
-				elif user_input == "time":
-					try:
-						user_dict = json.loads(sc.api_call("users.info", user=e.get("user")))
-					except Exception: 
-						message = "Failed to load users when looking up your name"
-					
-					# grabs real name of user
-					name = user_dict["user"]["profile"]["real_name"]
-
-					for officer in officer_list:
-	
-						if officer.name == name:
-							minutes = officer.minutes % 60
-							hours = officer.minutes / 60
-
-							message = "You currently have a total of " + str(hours) + " hours, " + str(minutes) + " minutes in the lab." 
-
-					if not message:
-						message = "You are not in the google sheet."
-
-				elif e.get("text"):
-					message = "Here are the following commands I support:\n \
-					whois - prints people currently in the lab \n \
-					time - prints how long you were in the lab this past week \n \
-					status - toggle your status to online/offline \n \
-					top - prints the top ten time totals \n \
-					version - prints current version \n"
+					# return a message based on the user's input
+					message = handle_input(user_input, e, sc)
 
 				# if there is a message to send, then send it
 				# will not respond if received from bot message to prevent
 				# looping conversation with itself
-				if message != "" and e.get("user") != bot_id:
+				if message and e.get("user") != bot_id:
 					chan_id = e.get("channel")
 					sc.api_call("chat.postMessage", as_user="true:", channel=chan_id, text=message)
 
@@ -344,7 +405,7 @@ def main():
 				# run quietly
 				run_scan()
 	else:
-		print "Connection Failed: invalid token"
+		sys.stderr.write("Connection Failed: invalid token")
 
 # runs main if run from the command line
 if __name__ == '__main__':
