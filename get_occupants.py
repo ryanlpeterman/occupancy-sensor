@@ -2,14 +2,8 @@
 #
 # Lab Occupancy Sensor - to tell if officers are in the lab
 # 		for the general members
-# TODO: 1. Write out the data to google sheets when the script fails (DONE)
-#		2. Poll less often (DONE)
-#		3. Add Status setting abilty to bot (DONE)
-#		4. treat officers differently based on status (DONE)
-#		5. treat errors so the program never crashes 
-#		6. Add lab general statistics (busiest time of day)
-# 		7. Add easter eggs
-#		8. Add weekly statistics
+# TODO: 1. Write to and read from CSV file
+# 		2. Create weekly files and statistics that are csv files
 
 import subprocess
 import os
@@ -18,10 +12,12 @@ import time
 from slackclient import SlackClient
 import gspread
 from oauth2client.client import SignedJwtAssertionCredentials
+import csv
+import datetime
 
 
 
-# to track stdout for bugfix
+# to track stderr for bugfix
 import sys
 import traceback
 import re
@@ -54,8 +50,8 @@ def check_output(s):
 class NewStderr:
 
 	def __getattr__(self, name):
-		"""called when attribute not defined for NewStdout is accessed"""
-		# if newstdout write is called
+		"""called when attribute not defined for NewStderr is accessed"""
+		# if newstderr write is called
 		if name == 'write':
 			return lambda s : check_output(s)
 
@@ -68,9 +64,6 @@ class NewStderr:
 sys.stderr = NewStderr()
 
 
-# TODO: load this from a file only on rpi
-# Token from slack for bot API
-bot_token = ""
 
 # list of officers
 officer_list = []
@@ -82,6 +75,7 @@ class Officer:
 	status = 0 # 0 == online, 1 == tracked 
 	minutes = 0
 	is_in_lab = False
+	week_min = 0
 	miss_count = 0 # if this gets to 5 we remove them from the list
 				   # if they are seen on the scan we set it to 0
 
@@ -90,6 +84,7 @@ class Officer:
 		self.mac_addr = ""
 		self.status = 0
 		self.minutes = 0
+		self.week_min = 0
 		self.is_in_lab = False
 		self.miss_count = 0
 
@@ -144,33 +139,8 @@ def run_scan():
 		# if they are in the lab then add a minute
 		if officer.is_in_lab:
 			officer.minutes += 1
+			officer.week_min += 1
 
-def exit_handler():
-	""" Writes out the lab info to google sheets then exits """
-
-	print "Entering exit handler"
-
-	# init google sheets api
-	json_key = json.load(open('occupancy sensor-52452f4f1313.json'))
-	scope = ['https://spreadsheets.google.com/feeds']
-	credentials = SignedJwtAssertionCredentials(json_key['client_email'], json_key['private_key'].encode(), scope)
-	gc = gspread.authorize(credentials)
-	wks = gc.open("Lab Occupancy Sensor").sheet1
-
-	# write-out all the data to google sheets
-	for officer in officer_list:
-
-		# holds cell of officer name
-		cell = wks.find(officer.name)
-
-		# write out the officers information TODO: don't hardcode this
-		wks.update_cell(cell.row, 3, officer.status)
-		wks.update_cell(cell.row, 4, officer.minutes)
-
-	print "Wrote out to google sheets!"
-
-	# exit without calling anything else
-	os._exit(0)
 
 def get_officers():
 	""" Checks current list of officers to see who is in the lab """
@@ -198,17 +168,25 @@ def get_officers():
 	
 	return officer_str
 
-def get_top_officers():
+def get_top_officers(all_time):
 	""" Returns a string of the top 10 total times among the officers """
 
-	top_list = sorted(officer_list, key=lambda x: x.minutes , reverse=True)
-
-	top_str = ""
+	if all_time:
+		top_list = sorted(officer_list, key=lambda x: x.minutes , reverse=True)
+		top_str = "Top of all time: \n"
+	else:
+		top_list = sorted(officer_list, key=lambda x: x.week_min , reverse=True)
+		top_str = "This Week's Top:\n"	
 
 	for index in xrange(1, 11):
 		cur_officer =  top_list[index - 1]
-		hours = cur_officer.minutes / 60
-		minutes = cur_officer.minutes % 60
+
+		if all_time:
+			hours = cur_officer.minutes / 60
+			minutes = cur_officer.minutes % 60
+		else:
+			hours = cur_officer.week_min / 60
+			minutes = cur_officer.week_min % 60
 
 		if cur_officer.status:
 			name = "John Cena (Anonymous)"
@@ -220,6 +198,99 @@ def get_top_officers():
 	return top_str
 
 def init_officers():
+	""" Populates all the officer objects with their data from csv"""
+
+	f = open('total_hours.csv', 'rb')
+	reader = csv.reader(f)
+	# skip over header_list
+	header_list = reader.next()
+
+	for row in reader:
+
+		# create officer object
+		officer = Officer()
+
+		for col_label, i  in zip(header_list, range(len(header_list))):
+			if col_label == "Name":
+				officer.name = str(row[i])
+			elif col_label == "Mac Address":
+				# lower because this is how arp-scan outputs it
+				officer.mac_addr = str(row[i].lower())
+			elif col_label == "Status":
+				officer.status = int(row[i])
+			elif col_label == "Minutes":
+				officer.minutes = int(row[i])
+		
+		# add officer to officer list
+		officer_list.append(officer)
+
+	f.close()
+
+	# gets int corresponding to this week
+	this_week = datetime.datetime.now().isocalendar()[1]
+
+	# path to folder containing weekly records
+	week_path = "weekly/" + str(this_week)
+
+	# already have record for this week load it to weekly 
+	if os.path.isfile(week_path):
+		f = open(week_path, 'rb')
+		reader = csv.reader(f)
+		# TODO
+	# file does not exist yet we create it and write all 0's to it
+	else:
+		f = open(week_path, 'w')
+		writer = csv.writer(f)
+
+		# write 0's out to weekly csv since its a new file
+		for officer in officer_list:
+			row = [officer.name, 0]
+			writer.writerow(row)
+
+		f.close()
+
+	for officer in officer_list:
+		officer.print_officer()
+
+def exit_handler():
+	""" Writes out to the csv and exits """
+
+	# open file
+	f = open('total_hours.csv', 'w')
+	writer = csv.writer(f)
+
+	# Write out header
+	header_list = ["Name", "Mac Address", "Status", "Minutes"]
+	writer.writerow(header_list)
+
+	# write out every officer as a row in csv
+	for officer in officer_list:
+		row = [officer.name, officer.mac_addr, officer.status, officer.minutes]
+		writer.writerow(row)
+
+	f.close()
+
+	# gets int corresponding to this week
+	this_week = datetime.datetime.now().isocalendar()[1]
+
+	# path to folder containing weekly records
+	week_path = "weekly/" + str(this_week)
+
+	f = open(week_path, 'w')
+	writer = csv.writer(f)
+
+	# write 0's out to weekly csv since its a new file
+	for officer in officer_list:
+		row = [officer.name, officer.week_min]
+		writer.writerow(row)
+
+	f.close()
+
+	# exit without calling anything else
+	os._exit(0)
+
+
+def load_from_gsheets():
 	""" Populates all the officer objects with their data from the google sheets API"""
 
 	json_key = json.load(open('occupancy sensor-52452f4f1313.json'))
@@ -229,6 +300,9 @@ def init_officers():
 	# open worksheet
 	wks = gc.open("Lab Occupancy Sensor").sheet1
 	num_officers = wks.row_count - 1
+
+	# reset officer list
+	officer_list = []
 
 	# create list of officer objects
 	for i in xrange(num_officers):
@@ -252,6 +326,29 @@ def init_officers():
 			elif col_label == "Minutes":
 				officer.minutes = int(value)
 
+def write_to_gsheets():
+	""" Writes out the lab info to google sheets then exits """
+
+	# init google sheets api
+	json_key = json.load(open('occupancy sensor-52452f4f1313.json'))
+	scope = ['https://spreadsheets.google.com/feeds']
+	credentials = SignedJwtAssertionCredentials(json_key['client_email'], json_key['private_key'].encode(), scope)
+	gc = gspread.authorize(credentials)
+	wks = gc.open("Lab Occupancy Sensor").sheet1
+
+	# write-out all the data to google sheets
+	for officer in officer_list:
+
+		# holds cell of officer name
+		cell = wks.find(officer.name)
+
+		# write out the officers information TODO: don't hardcode this
+		wks.update_cell(cell.row, 3, officer.status)
+		wks.update_cell(cell.row, 4, officer.minutes)
+
+	# exit without calling anything else
+	os._exit(0)
+
 def handle_input(user_input, event, sc):
 	""" returns the message that a user would receive based on their input """
 
@@ -261,7 +358,7 @@ def handle_input(user_input, event, sc):
 	if user_input == "whois":
 		# reply with list of officers
 		message = get_officers()
-	
+
 	elif user_input == "kill":
 		try:
 			user_dict = json.loads(sc.api_call("users.info", user=event.get("user")))
@@ -274,7 +371,7 @@ def handle_input(user_input, event, sc):
 			print "Received kill command from slack"
 			
 			# send message to Ryan to let him know we are restarting the script
-			message = "Killed it, writing to google sheets. One moment please"
+			message = "Killed it"
 			chan_id = event.get("channel")
 			sc.api_call("chat.postMessage", as_user="true:", channel=chan_id, text=message)
 			
@@ -302,13 +399,16 @@ def handle_input(user_input, event, sc):
 				else:
 					message = "You are currently not tracked/offline. You are not visible to others but are still gaining time in the lab statistics. \n"
 	
-	elif user_input == "top":
-		message = get_top_officers()
+	elif user_input == "weektop":
+		message = get_top_officers(False)
+
+	elif user_input == "alltop":
+		message = get_top_officers(True)
 
 	elif user_input == "version":
-		message = "petermanbot v B0.1.3 - I'm Beta as Fuck right now."				
+		message = "petermanbot v B0.1.5 - I'm Beta as Fuck right now."				
 
-	elif user_input == "time":
+	elif "time" in user_input:
 		try:
 			user_dict = json.loads(sc.api_call("users.info", user=event.get("user")))
 		except Exception: 
@@ -318,43 +418,43 @@ def handle_input(user_input, event, sc):
 		name = user_dict["user"]["profile"]["real_name"]
 
 		for officer in officer_list:
-
 			if officer.name == name:
-				minutes = officer.minutes % 60
-				hours = officer.minutes / 60
 
-				message = "You currently have a total of " + str(hours) + " hours, " + str(minutes) + " minutes in the lab." 
+				if user_input == "alltime":
+					minutes = officer.minutes % 60
+					hours = officer.minutes / 60
+					message = "You currently have a total of " + str(hours) + " hours, " + str(minutes) + " minutes in the lab for all time." 
+				elif user_input == "weektime":
+					minutes = officer.week_min % 60
+					hours = officer.week_min / 60
+					message = "You currently have a total of " + str(hours) + " hours, " + str(minutes) + " minutes in the lab for this week." 
+
 
 		if not message:
-			message = "You are not in the google sheet."
+			message = "You are not in the google sheet or your mistyped \"alltime\" or \"weektime\""
 
 	else:
 		# TODO: fix this convention with paren around string
-		message = "Here are the following commands I support:\n \
+		message = "CHECK FOR UPDATES - Here are the following commands I support:\n \
 		whois - prints people currently in the lab \n \
-		time - prints how long you were in the lab this past week \n \
+		weektime - prints how long you were in the lab this past week \n \
+		alltime - prints how long you were in lab for all time \n \
 		status - toggle your status to online/offline \n \
-		top - prints the top ten time totals \n \
+		weektop - prints the top ten time totals for the week \n \
+		alltop - prints the top ten time totals for all time \n \
 		version - prints current version \n"
 
 	return message
 
 def main():
+	# read the api key into variable
+	with open('key.txt', 'r') as key_file:
+		bot_token = key_file.read().replace('\n', '')
+
 	# init bot token and officers from google sheets
 	sc = SlackClient(bot_token)
 
-	for attempt in xrange(20):
-		try:
-			init_officers()
-		except Exception:
-			if attempt == 19:
-				# exit without running finally block
-				# since we were not able to load from gdocs.
-				# we do not want to overwrite with null values during cleanup
-				os._exit(2)
-			continue
-		break
-
+	init_officers()
 
 	# TODO: Dynamically find the bot's id using users.list
 	# could cause problem if this changes for some reason
