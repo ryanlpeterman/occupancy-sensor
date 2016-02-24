@@ -236,7 +236,14 @@ def init_officers():
 	if os.path.isfile(week_path):
 		f = open(week_path, 'rb')
 		reader = csv.reader(f)
-		# TODO
+		# check every row of weekly csv
+		for row in reader:
+			# check all officers against current row
+			for officer in officer_list:
+				# if first col matches officer then set its weekly minutes
+				if row[0] == officer.name:
+					officer.week_min = int(row[1])
+
 	# file does not exist yet we create it and write all 0's to it
 	else:
 		f = open(week_path, 'w')
