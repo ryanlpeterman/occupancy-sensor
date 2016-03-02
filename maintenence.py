@@ -1,4 +1,5 @@
 from slackclient import SlackClient
+import time
 
 def main():
 	# read the api key into variable
@@ -8,7 +9,7 @@ def main():
 	# init bot token and officers from google sheets
 	sc = SlackClient(bot_token)
 
-	init_officers()
+
 
 	# TODO: Dynamically find the bot's id using users.list
 	# could cause problem if this changes for some reason
@@ -56,8 +57,8 @@ def main():
 			# run script to build up statistics
 			if counter >= 60:
 				counter = 0
-				# run quietly
-				run_scan()
+
+
 	else:
 		sys.stderr.write("Connection Failed: invalid token")
 
