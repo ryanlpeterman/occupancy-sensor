@@ -15,8 +15,6 @@ from oauth2client.client import SignedJwtAssertionCredentials
 import csv
 import datetime
 
-
-
 # to track stderr for bugfix
 import sys
 import traceback
@@ -95,7 +93,7 @@ class Officer:
 			print m_data + " = " + str(getattr(self, m_data))
 
 def run_scan():
-	""" populates officer list with mac addresses seen in arp-scan """
+	""" populates officer list with mac addresses seen in arp-scan, returns number of matches """
 
 	# store arp output (max 20 retries)
 	for attempt in xrange(20):
@@ -112,6 +110,8 @@ def run_scan():
 	if not arp_output:
 		sys.stderr.write("Error: arp-scan did not work correctly even after 20 tries")
 
+	# number of hits
+	num_hits = 0
 	# used to add to miss count
 	scan_hit = False
 
@@ -140,7 +140,9 @@ def run_scan():
 		if officer.is_in_lab:
 			officer.minutes += 1
 			officer.week_min += 1
+			num_hits += 1
 
+	return num_hits
 
 def get_officers():
 	""" Checks current list of officers to see who is in the lab """
@@ -506,11 +508,22 @@ def main():
 			time.sleep(1)
 			counter += 1
 
-			# run script to build up statistics
+			# every minute
 			if counter >= 60:
 				counter = 0
+
 				# run quietly
-				run_scan()
+				num_hits = run_scan()
+
+				# check time for every 10 minutes
+				curr_time = time.localtime()
+				if curr_time.tm_min % 10 == 0:
+
+					row = str(curr_time.tm_hour) + ":" + str(curr_time.tm_min) + "," + str(num_hits) + "\n"
+
+					with open("daily_activity/" + str(curr_time.tm_mday) + ".csv", 'a') as f:
+						f.write(row)
+				
 	else:
 		sys.stderr.write("Connection Failed: invalid token")
 
