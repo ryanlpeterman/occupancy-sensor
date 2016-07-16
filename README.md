@@ -1,28 +1,25 @@
-## Initial Problem
+# Occupancy Sensor
+Python script that runs on a Raspberry Pi inside of student group, UCLA IEEE's, lab. Scans wifi network once a minute to keep a list of officers that are in the lab. If members of the club message the bot on slack, it responds with list of officers available in the lab. Also keeps track of length of visits in lab. Here is an example screenshot of the help command:
 
-I lost my keys the other day and couldn't get into my apartment
+![Screenshot](http://rpeterman.me/app/static/petermanbot.png)
 
-## Current Problem
+## Problem
+UCLA IEEE, the electrical engineering club on campus, has a lab that is only open when officers are in the lab for assistance. The lab is not consistently open in the morning since most officers are night dwellers and therefore its hard to tell if the lab is open. Therefore this script runs a Slack bot that members can message to tell if the lab is open.
 
-UCLA IEEE, the electrical engineering club on campus, has a lab in which there are parts available and many projects being worked on all the time by its members. However, the lab is only open when officers are in the lab for assistance, which is just about 24/7. The only problem is that because as engineers we are night dwellers, the lab is not consistently open in the morning and therefore its hard to tell if its okay to come in. Therefore this script is being moded to tell if officers are in the lab.
-
-## Solution
-
+## Technical Overview
 How the look-up works:
 
-	1. Use arp-scan to ask router for mac addresses of devices connected to the router
-	2. Find what the corresponding person associated with that mac address is
+1. Use arp-scan to ask router for mac addresses of devices connected to the router
+2. Check if any MAC addresses match list of officers
 
 How Slack Bot works:
 
-	whois - prints out a list of the people currently in the lab by look-up method
+Constantly pings Slack Python API for incomming messages and responds accordingly. Every minute the script performs a scan of the network
+to update its records so the Slack messages contain the most up to date information.
 
-	time - outputs the number of seconds the person has been in the lab since the 
-	script has been running (this is updated everytime the rpi scans)
-
-	help - prints out all options
-
-## Future Features
-
-1. Introduce natural language processing into the model such that the users don't need to 
-type in exact queries similar to how Siri works.
+## Basic Commands
+```
+whois - prints out a list of the people currently in the lab by look-up method
+time - outputs the number of seconds the person has been in the lab since the script has been running
+help - prints out all options
+```
